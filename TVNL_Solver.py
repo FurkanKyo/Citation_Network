@@ -4,6 +4,7 @@ import numpy as np
 import networkx as nx
 import os
 import json
+from random import shuffle
 
 DEFAULT = object()
 
@@ -241,10 +242,14 @@ def graph_optimizer(total_steps, graph_path, snapshots_path, G_features_path, la
                 node_index += 1
             print('Nodes are added for snapshot ', s, ' in ', time.time()-t_0, ' seconds')
             # Add static edges in the snapshot s
+
+            edge_count = 0
             for edge in nx.edges(G):
-                src = gvx.GetNodeVariables(node_key_id_dict[edge[0]][s])
-                dst = gvx.GetNodeVariables(node_key_id_dict[edge[1]][s])
-                gvx.AddEdge(node_key_id_dict[edge[0]][s], node_key_id_dict[edge[1]][s], Objective = lambda_s_e*sum_squares(src['x'] - dst['x']))
+                edge_count += 1
+                if edge_count % 3 == 0:
+                    src = gvx.GetNodeVariables(node_key_id_dict[edge[0]][s])
+                    dst = gvx.GetNodeVariables(node_key_id_dict[edge[1]][s])
+                    gvx.AddEdge(node_key_id_dict[edge[0]][s], node_key_id_dict[edge[1]][s], Objective = lambda_s_e*sum_squares(src['x'] - dst['x']))
 
             print('End of snapshot, ', s, ' in ', time.time()-t_0, ' seconds')
 
