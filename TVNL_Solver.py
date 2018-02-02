@@ -8,7 +8,7 @@ from random import shuffle
 
 DEFAULT = object()
 
-def laplace_reg(src, dst, data, lambda_s_e = 1):
+def laplace_reg(src, dst, data):
     return (lambda_s_e*sum_squares(src['x'] - dst['x']), [])
 
 # Test performance via total loss on train set
@@ -197,7 +197,10 @@ def graph_optimizer(total_steps, graph_path, snapshots_path, G_features_path, la
     with open(G_features_path) as file:
         features_dict = json.load(file)
 
-    num_features = len(features_dict[list(features_dict.keys())[0]])
+    if isinstance(features_dict[list(features_dict.keys())[0]][0], list):
+        num_features = len(features_dict[list(features_dict.keys())[0]][0])
+    else:
+        num_features = len(features_dict[list(features_dict.keys())[0]])
     print('Num of features on each node: ', num_features)
 
     print('Testing node counts:', len(features_dict.keys()) == num_nodes, len(features_dict.keys()), num_nodes)
@@ -215,22 +218,38 @@ def graph_optimizer(total_steps, graph_path, snapshots_path, G_features_path, la
 
             for key in features_dict.keys():
 
-                x = Variable(num_features+1, name='x')
+                x = Variable(num_features, name='x')
+                #beta = Variable(num_features, name='b')
                 obj = 0
                 pred_y = 0
+                if isinstance(features_dict[key][0], list):
+                    for i in range(10): # len(features_dict[key])
+                        pred_y = 0
 
-                w = features_dict[key]
+                        w = features_dict[key][i]
 
-                y = list_of_snapshot_dirs[s][key]
+                        y = list_of_snapshot_dirs[s][key][i]
 
-                for l in range(num_features):
-                    pred_y += x[l] * w[l]
-                pred_y += x[-1]
-                obj += lambda_f*square(pred_y - y)
+                        for l in range(num_features):
+                            pred_y += x[l] * w[l]
+                        #pred_y += x[-1] # Add bias
+                        obj += lambda_f*square(y - pred_y)
 
-                obj += lambda_f_r * sum_squares(x)
+                else:
+                    w = features_dict[key]
+
+                    y = list_of_snapshot_dirs[s][key]
+
+                    for l in range(num_features):
+                        pred_y += x[l] * w[l]
+                    #pred_y += x[-1]  # Add bias
+                    obj += lambda_f * square(y - pred_y)
+
+                obj += lambda_f_r * sum(x) # Add regression regularizor
+                #obj += lambda_f_r * sum_squares(beta)
                 # Add the key node
-                gvx.AddNode(node_index, Objective = obj)
+                constraints = [x >= 0]
+                gvx.AddNode(node_index, Objective = obj, Constraints=constraints)
 
                 node_id_key_dict[node_index] = key
 
@@ -244,12 +263,13 @@ def graph_optimizer(total_steps, graph_path, snapshots_path, G_features_path, la
             # Add static edges in the snapshot s
 
             edge_count = 0
+            #print(nx.edges(G))
             for edge in nx.edges(G):
                 edge_count += 1
-                if edge_count % 3 == 0:
-                    src = gvx.GetNodeVariables(node_key_id_dict[edge[0]][s])
-                    dst = gvx.GetNodeVariables(node_key_id_dict[edge[1]][s])
-                    gvx.AddEdge(node_key_id_dict[edge[0]][s], node_key_id_dict[edge[1]][s], Objective = lambda_s_e*sum_squares(src['x'] - dst['x']))
+                #if edge_count % 10 == 0:
+                src = gvx.GetNodeVariables(node_key_id_dict[edge[0]][s])
+                dst = gvx.GetNodeVariables(node_key_id_dict[edge[1]][s])
+                gvx.AddEdge(node_key_id_dict[edge[0]][s], node_key_id_dict[edge[1]][s], Objective = lambda_s_e*sum_squares(src['x'] - dst['x'] ))
 
             print('End of snapshot, ', s, ' in ', time.time()-t_0, ' seconds')
 
@@ -271,11 +291,28 @@ def graph_optimizer(total_steps, graph_path, snapshots_path, G_features_path, la
         # Graph is ready, now solve it!!
         print('Step :', step, ' ***')
         t_0 = time.time()
-        gvx.Solve()
+        gvx.Solve(UseADMM = True, Verbose=True) #UseADMM=True
         t_1 = time.time()
 
         print('Total time passed to solve: ', str(t_1-t_0))
         print('Solution: ', gvx.value)
+        for i in range(node_index):
+            print(node_id_key_dict[i], gvx.GetNodeValue(i, 'x'))
+            #print(node_id_key_dict[i], gvx.GetNodeValue(i, 'b'))
+            # for s in range(num_of_snapshots):
+            #     if isinstance(features_dict[key], list):
+            #         test_obj = 0
+            #         for j in range(1):  # len(features_dict[key])
+            #             test_pred_y = 0
+            #             test_w = features_dict[node_id_key_dict[i]][j]
+            #             test_y = list_of_snapshot_dirs[s][node_id_key_dict[i]][j]
+            #             for l in range(len(test_w)):
+            #                 test_pred_y += gvx.GetNodeValue(i, 'x')[l] * test_w[l]
+            #             test_pred_y += gvx.GetNodeValue(i, 'x')[-1]  # Add bias
+            #             test_obj += lambda_f * (test_pred_y - test_y)*(test_pred_y - test_y)
+            #             print(test_w)
+            #             print(test_y, test_pred_y)
+            #             print(test_obj)
 
 
 # Synthetic Example
@@ -751,12 +788,16 @@ def loss_calculator():
 
 
 total_steps = 1
-graph_path = '/home/furkan/Desktop/SNAPVX/Graph.gpickle'
-snapshots_path = '/home/furkan/Desktop/SNAPVX/Snapshots/'
-G_features_path = '/home/furkan/Desktop/SNAPVX/Node_Features_Dict'
-lambda_f = 0.1
-lambda_f_r = 0.1
-lambda_s_e = 0.1
-lambda_t_e = 0.1
+#graph_path = '/home/furkan/Desktop/SNAPVX/Graph.gpickle'
+#snapshots_path = '/home/furkan/Desktop/SNAPVX/Snapshots/'
+#G_features_path = '/home/furkan/Desktop/SNAPVX/Node_Features_Dict'
+SF_base_path = '/home/furkan/Desktop/TVNL/Datasets/SF/'
+graph_path = SF_base_path + 'SF_Graph.gpickle'
+snapshots_path = SF_base_path + 'Snapshots/'
+G_features_path = SF_base_path + 'Feature/SF_features.txt'
+lambda_f = 1
+lambda_f_r = 2
+lambda_s_e = 1
+lambda_t_e = 0
 graph_optimizer(total_steps, graph_path, snapshots_path, G_features_path, lambda_f, lambda_f_r, lambda_s_e, lambda_t_e, num_of_snapshots=1)
 
